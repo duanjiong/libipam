@@ -1,0 +1,6 @@
+resources:
+  - ./network.kubesphere.io_blockaffinities.yaml
+  - ./network.kubesphere.io_ipamblocks.yaml
+  - ./network.kubesphere.io_ipamconfigs.yaml
+  - ./network.kubesphere.io_ipamhandles.yaml
+  - ./network.kubesphere.io_ippools.yaml

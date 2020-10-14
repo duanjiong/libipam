@@ -1,0 +1,76 @@
+
+---
+apiVersion: apiextensions.k8s.io/v1beta1
+kind: CustomResourceDefinition
+metadata:
+  creationTimestamp: null
+  name: nodes.network.kubesphere.io
+spec:
+  group: network.kubesphere.io
+  names:
+    categories:
+    - network
+    kind: Node
+    plural: nodes
+  scope: Cluster
+  validation:
+    openAPIV3Schema:
+      description: Node contains information about a Node resource.
+      properties:
+        apiVersion:
+          description: 'APIVersion defines the versioned schema of this representation
+            of an object. Servers should convert recognized schemas to the latest
+            internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+          type: string
+        kind:
+          description: 'Kind is a string value representing the REST resource this
+            object represents. Servers may infer this from the endpoint the client
+            submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+          type: string
+        metadata:
+          description: Standard object's metadata.
+          type: object
+        spec:
+          description: Specification of the Node.
+          properties:
+            orchRefs:
+              description: OrchRefs for this node.
+              items:
+                description: OrchRef is used to correlate a Calico node to its corresponding
+                  representation in a given orchestrator
+                properties:
+                  nodeName:
+                    description: NodeName represents the name for this node according
+                      to the orchestrator.
+                    type: string
+                  orchestrator:
+                    description: Orchestrator represents the orchestrator using this
+                      node.
+                    type: string
+                required:
+                - orchestrator
+                type: object
+              type: array
+          type: object
+        status:
+          description: Status of the Node.
+          properties:
+            podCIDRs:
+              description: PodCIDR is a reflection of the Kubernetes node's spec.PodCIDRs
+                field.
+              items:
+                type: string
+              type: array
+          type: object
+      type: object
+  version: v1alpha1
+  versions:
+  - name: v1alpha1
+    served: true
+    storage: true
+status:
+  acceptedNames:
+    kind: ""
+    plural: ""
+  conditions: []
+  storedVersions: []

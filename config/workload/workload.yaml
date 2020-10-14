@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ipam
+spec:
+  selector:
+    matchLabels:
+      app: ks-ipam
+  template:
+    metadata:
+      labels:
+        app: ks-ipam
+    spec:
+      hostNetwork: true
+      containers:
+        - image: duanjiong/ipam:latest
+          imagePullPolicy: Always
+          name: ks-ipam
+          tty: true
+      serviceAccountName: ks-ipam
