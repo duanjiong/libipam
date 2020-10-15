@@ -20,59 +20,31 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"kubesphere.io/libipam/lib/utils"
+	"math"
+	"math/rand"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/projectcalico/libcalico-go/lib/apiconfig"
-	cnet "github.com/projectcalico/libcalico-go/lib/net"
-	"github.com/projectcalico/libcalico-go/lib/options"
-	"kubesphere.io/libipam/lib/apis/v1alpha1"
-	"k8s.io/klog"
-
 	"github.com/containernetworking/cni/pkg/skel"
 	cnitypes "github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/cni/pkg/types/current"
 	cniSpecVersion "github.com/containernetworking/cni/pkg/version"
-	"github.com/sirupsen/logrus"
-
+	"github.com/projectcalico/libcalico-go/lib/apiconfig"
 	"github.com/projectcalico/libcalico-go/lib/errors"
 	"github.com/projectcalico/libcalico-go/lib/logutils"
+	"github.com/projectcalico/libcalico-go/lib/names"
+	cnet "github.com/projectcalico/libcalico-go/lib/net"
+	"github.com/projectcalico/libcalico-go/lib/options"
+	"github.com/sirupsen/logrus"
+	lumberjack "gopkg.in/natefinch/lumberjack.v2"
+	"kubesphere.io/libipam/lib/apis/v1alpha1"
 	"kubesphere.io/libipam/lib/client"
 	"kubesphere.io/libipam/lib/ipam"
-
-	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 )
-
-func main() {
-	// Set up logging formatting.
-	logrus.SetFormatter(&logutils.Formatter{})
-
-	// Install a hook that adds file/line no information.
-	logrus.AddHook(&logutils.ContextHook{})
-
-	// Display the version on "-v", otherwise just delegate to the skel code.
-	// Use a new flag set so as not to conflict with existing libraries which use "flag"
-	flagSet := flag.NewFlagSet("calico-ipam", flag.ExitOnError)
-
-	versionFlag := flagSet.Bool("v", false, "Display version")
-	err := flagSet.Parse(os.Args[1:])
-
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
-
-	if *versionFlag {
-		os.Exit(0)
-	}
-	klog.Errorf("hahahahhahahahahah")
-
-	skel.PluginMain(cmdAdd, nil, cmdDel,
-		cniSpecVersion.PluginSupports("0.1.0", "0.2.0", "0.3.0", "0.3.1"), "")
-}
 
 // Kubernetes a K8s specific struct to hold config
 type Kubernetes struct {
@@ -85,29 +57,64 @@ type NetConf struct {
 	Name       string `json:"name"`
 	Type       string `json:"type"`
 
-	DatastoreType string `json:"datastore_type"`
-
 	LogLevel        string `json:"log_level"`
 	LogFilePath     string `json:"log_file_path"`
 	LogFileMaxSize  int    `json:"log_file_max_size"`
 	LogFileMaxAge   int    `json:"log_file_max_age"`
 	LogFileMaxCount int    `json:"log_file_max_count"`
 
-	Kubernetes Kubernetes `json:"kubernetes"`
+	DatastoreType string     `json:"datastore_type"`
+	Kubernetes    Kubernetes `json:"kubernetes"`
 }
 
 type ipamArgs struct {
 	cnitypes.CommonArgs
-	Name      cnitypes.UnmarshallableString
-	Namespace cnitypes.UnmarshallableString
-	Pool      cnitypes.UnmarshallableString
+	Type                       cnitypes.UnmarshallableString
+	K8S_POD_NAME               cnitypes.UnmarshallableString
+	K8S_POD_NAMESPACE          cnitypes.UnmarshallableString
+	K8S_POD_INFRA_CONTAINER_ID cnitypes.UnmarshallableString
+	K8S_POD_INFRA_VM_ID        cnitypes.UnmarshallableString
+	Pool                       cnitypes.UnmarshallableString
+}
+
+func main() {
+	// Set up logging formatting.
+	logrus.SetFormatter(&logutils.Formatter{})
+
+	// Install a hook that adds file/line no information.
+	logrus.AddHook(&logutils.ContextHook{})
+
+	// Display the version on "-v", otherwise just delegate to the skel code.
+	// Use a new flag set so as not to conflict with existing libraries which use "flag"
+	flagSet := flag.NewFlagSet("ks-ipam", flag.ExitOnError)
+
+	versionFlag := flagSet.Bool("v", false, "Display version")
+	err := flagSet.Parse(os.Args[1:])
+
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
+	if *versionFlag {
+		os.Exit(0)
+	}
+
+	skel.PluginMain(cmdAdd, nil, cmdDel,
+		cniSpecVersion.PluginSupports("0.1.0", "0.2.0", "0.3.0", "0.3.1"), "Kubesphere IPAM")
 }
 
 func getHandleID(args ipamArgs) string {
-	return fmt.Sprintf("%s-%s", args.Namespace, args.Name)
+	handleID := ""
+	switch args.Type {
+	case MACVTAP:
+		handleID = fmt.Sprintf("%s-%s-%s", args.Type, args.K8S_POD_NAMESPACE, args.K8S_POD_INFRA_VM_ID)
+	default:
+		handleID = fmt.Sprintf("%s-%s-%s", args.Type, args.K8S_POD_NAMESPACE, args.K8S_POD_INFRA_CONTAINER_ID)
+	}
+	return handleID
 }
 
-// Set up logging for both Calico and libcalico using the provided log level,
 func ConfigureLogging(conf NetConf) {
 	if strings.EqualFold(conf.LogLevel, "debug") {
 		logrus.SetLevel(logrus.DebugLevel)
@@ -188,6 +195,80 @@ func CreateClient(conf NetConf) (client.Interface, error) {
 	return calicoClient, nil
 }
 
+const (
+	MACVTAP = "macvtap"
+)
+
+func parseIpamArgs(args string) (ipamArgs, error) {
+	ipamArgs := ipamArgs{}
+	if err := cnitypes.LoadArgs(args, &ipamArgs); err != nil {
+		return ipamArgs, err
+	}
+
+	switch ipamArgs.Type {
+	case MACVTAP:
+		if ipamArgs.K8S_POD_NAMESPACE == "" || ipamArgs.K8S_POD_INFRA_VM_ID == "" || ipamArgs.Pool == "" {
+			return ipamArgs, fmt.Errorf("K8S_POD_NAMESPACE/K8S_POD_INFRA_VM_ID/Pool should not be empty")
+		}
+	default:
+		if ipamArgs.K8S_POD_NAMESPACE == "" || ipamArgs.K8S_POD_NAME == "" || ipamArgs.K8S_POD_INFRA_CONTAINER_ID == "" {
+			return ipamArgs, fmt.Errorf("K8S_POD_NAMESPACE/K8S_POD_NAME/K8S_POD_INFRA_CONTAINER_ID should not be empty")
+		}
+	}
+
+	return ipamArgs, nil
+}
+
+func fillAutoAssignArgs(pools []v1alpha1.IPPool, args ipamArgs) ipam.AutoAssignArgs {
+	handleID := getHandleID(args)
+	assignArgs := ipam.AutoAssignArgs{
+		HandleID: &handleID,
+	}
+
+	switch args.Type {
+	case MACVTAP:
+		assignArgs.Num4 = 1
+		assignArgs.Hostname = MACVTAP
+
+		attrs := map[string]string{}
+		attrs[ipam.AttributeVm] = string(args.K8S_POD_INFRA_VM_ID)
+		attrs[ipam.AttributeNamespace] = string(args.K8S_POD_NAMESPACE)
+		attrs[ipam.AttributeType] = string(args.Type)
+	default:
+		//TODO
+		assignArgs.Num4 = 1
+		assignArgs.Hostname, _ = names.Hostname()
+
+		attrs := map[string]string{}
+		attrs[ipam.AttributePod] = string(args.K8S_POD_NAME)
+		attrs[ipam.AttributeNamespace] = string(args.K8S_POD_NAMESPACE)
+		attrs[ipam.AttributeType] = string(args.Type)
+	}
+
+	for _, ipp := range pools {
+		// Found a match. Use the CIDR from the matching pool.
+		_, cidr, _ := net.ParseCIDR(ipp.Spec.CIDR)
+		logrus.Infof("Resolved pool name %s to cidr %s", ipp.Name, cidr)
+		assignArgs.IPv4Pools = append(assignArgs.IPv4Pools, cnet.IPNet{IPNet: *cidr})
+		assignArgs.ID = ipp.ID()
+
+		switch args.Type {
+		case MACVTAP:
+			ones, bits := cidr.Mask.Size()
+			if ipp.Spec.RangeStart != "" && ipp.Spec.RangeEnd != "" {
+				assignArgs.HostReservedAttrIPv4s = &ipam.HostReservedAttr{
+					StartOfBlock: int(utils.IP2Int(net.ParseIP(ipp.Spec.RangeStart)) - utils.IP2Int(cidr.IP)),
+					EndOfBlock:   int(utils.IP2Int(cidr.IP) + uint32(math.Pow(2, float64(bits-ones))) - utils.IP2Int(net.ParseIP(ipp.Spec.RangeEnd)) - 1),
+					Handle:       MACVTAP,
+					Note:         "macvtap reserve",
+				}
+			}
+		}
+	}
+
+	return assignArgs
+}
+
 func cmdAdd(args *skel.CmdArgs) error {
 	conf := NetConf{}
 	if err := json.Unmarshal(args.StdinData, &conf); err != nil {
@@ -201,8 +282,8 @@ func cmdAdd(args *skel.CmdArgs) error {
 		return err
 	}
 
-	ipamArgs := ipamArgs{}
-	if err = cnitypes.LoadArgs(args.Args, &ipamArgs); err != nil {
+	ipamArgs, err := parseIpamArgs(args.Args)
+	if err != nil {
 		return err
 	}
 
@@ -211,82 +292,96 @@ func cmdAdd(args *skel.CmdArgs) error {
 		"HandleID": handleID,
 	})
 
-	// We attach important attributes to the allocation.
-	attrs := map[string]string{}
-	attrs[ipam.AttributeVm] = string(ipamArgs.Name)
-	attrs[ipam.AttributeNamespace] = string(ipamArgs.Namespace)
-
 	ctx := context.Background()
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 
 	r := &current.Result{}
 
-	// Default to assigning an IPv4 address
-	num4 := 1
-
 	pl, err := client.IPPools().List(ctx, options.ListOptions{})
 	if err != nil {
 		return err
 	}
 
-	assignArgs := ipam.AutoAssignArgs{
-		Num4:     num4,
-		HandleID: &handleID,
-		Hostname: "fake",
-		Attrs:    attrs,
-	}
-
-	logrus.Debugf("ipamArgs=%v, pools=%v", ipamArgs, pl.Items)
-	var pool v1alpha1.IPPool
+	var (
+		assignArgs   ipam.AutoAssignArgs
+		requestPools []v1alpha1.IPPool
+		resultPool   v1alpha1.IPPool
+	)
 	for _, ipp := range pl.Items {
 		if ipp.Name == string(ipamArgs.Pool) {
-			// Found a match. Use the CIDR from the matching pool.
-			_, cidr, err := net.ParseCIDR(ipp.Spec.CIDR)
-			if err != nil {
-				return fmt.Errorf("failed to parse IP pool cidr: %s", err)
-			}
-			logrus.Infof("Resolved pool name %s to cidr %s", ipp.Name, cidr)
-			assignArgs.IPv4Pools = append(assignArgs.IPv4Pools, cnet.IPNet{IPNet: *cidr})
-			assignArgs.ID = ipp.Spec.VLAN.VlanId
-			pool = ipp
+			requestPools = append(requestPools, ipp)
 			break
 		}
 	}
 
+	assignArgs = fillAutoAssignArgs(requestPools, ipamArgs)
+
 	logger.WithField("assignArgs", assignArgs).Info("Auto assigning IP")
 	assignedV4, assignedV6, err := client.IPAM().AutoAssign(ctx, assignArgs)
-	logger.Infof("Calico CNI IPAM assigned addresses IPv4=%v IPv6=%v", assignedV4, assignedV6)
+	logger.Infof("Kubesphere CNI IPAM assigned addresses IPv4=%v IPv6=%v", assignedV4, assignedV6)
 	if err != nil {
 		return err
 	}
 
-	if len(assignedV4) != num4 {
-		return fmt.Errorf("failed to request %d IPv4 addresses. IPAM allocated only %d", num4, len(assignedV4))
+	if len(assignedV4) != assignArgs.Num4 {
+		return fmt.Errorf("failed to request %d IPv4 addresses. IPAM allocated only %d", assignArgs.Num4, len(assignedV4))
 	}
+
 	ipV4Network := net.IPNet{IP: assignedV4[0].IP, Mask: assignedV4[0].Mask}
 	r.IPs = append(r.IPs, &current.IPConfig{
 		Version: "4",
 		Address: ipV4Network,
 	})
-	r.Interfaces = append(r.Interfaces, &current.Interface{
-		Name:    args.IfName,
-		Mac:     "00:00:00:00:00:00",
-		Sandbox: "",
-	})
 
-	fmt.Printf("%s", pool.Namespace)
-	/*
-		for _, route := range pool.Spec.Routes {
-			r.Routes = append(r.Routes, route)
+	for _, ipp := range pl.Items {
+		if ipp.ID() != assignArgs.ID {
+			continue
 		}
-		r.DNS = pool.Spec.DNS
-	*/
+		_, tmp, _ := cnet.ParseCIDR(ipp.Spec.CIDR)
+		if tmp.Contains(assignedV4[0].IP) {
+			resultPool = ipp
+			break
+		}
+	}
+	for _, route := range resultPool.Spec.Routes {
+		_, dst, _ := net.ParseCIDR(route.Dst)
+		r.Routes = append(r.Routes, &cnitypes.Route{
+			Dst: *dst,
+			GW:  net.ParseIP(route.GW),
+		})
+	}
+	r.DNS.Domain = resultPool.Spec.DNS.Domain
+	r.DNS.Options = resultPool.Spec.DNS.Options
+	r.DNS.Nameservers = resultPool.Spec.DNS.Nameservers
+	r.DNS.Search = resultPool.Spec.DNS.Search
 
-	logger.WithFields(logrus.Fields{"result.IPs": r.IPs}).Debug("IPAM Result")
+	if ipamArgs.Type == MACVTAP {
+		r.Interfaces = append(r.Interfaces, &current.Interface{
+			Name:    args.IfName,
+			Mac:     ethRandomAddr(assignedV4[0].IP),
+			Sandbox: "",
+		})
+	}
+
+	logger.WithFields(logrus.Fields{"result": r}).Debug("IPAM Result")
 
 	// Print result to stdout, in the format defined by the requested cniVersion.
 	return cnitypes.PrintResult(r, "0.3.0")
+}
+
+func ethRandomAddr(ip net.IP) string {
+	buf := make([]byte, 2)
+	rand.Read(buf)
+
+	// Clear multicast bit
+	buf[0] &= 0xfe
+	// Set the local bit
+	buf[0] |= 2
+
+	//TODO support ipv6
+	buf = append(buf, []byte(ip)...)
+	return fmt.Sprintf("%02x:%02x:%02x:%02x:%02x:%02x", buf[0], buf[1], buf[2], buf[3], buf[4], buf[5])
 }
 
 func cmdDel(args *skel.CmdArgs) error {
@@ -302,8 +397,8 @@ func cmdDel(args *skel.CmdArgs) error {
 		return err
 	}
 
-	ipamArgs := ipamArgs{}
-	if err = cnitypes.LoadArgs(args.Args, &ipamArgs); err != nil {
+	ipamArgs, err := parseIpamArgs(args.Args)
+	if err != nil {
 		return err
 	}
 

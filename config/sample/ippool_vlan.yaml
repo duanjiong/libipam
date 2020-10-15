@@ -1,0 +1,20 @@
+apiVersion: network.kubesphere.io/v1alpha1
+kind: IPPool
+metadata:
+  name: testippool
+spec:
+  type: vlan   # don't modify
+  cidr: 192.168.3.0/24
+  blockSize: 24  #should be equal to cidr mask size
+  vlanConfig:
+    vlanId: 2
+    master: eth1
+  rangeStart: 192.168.3.2
+  rangeEnd: 192.168.3.250
+  gateway: 192.168.3.1
+  dns:
+    nameservers:
+      - 192.168.3.1
+  routes:
+    - dst: 192.168.9.0/24
+      gateway: 192.168.3.1

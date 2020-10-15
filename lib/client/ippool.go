@@ -193,7 +193,7 @@ func (r ipPools) Delete(ctx context.Context, name string, opts options.DeleteOpt
 		// Pause for a short period before releasing the affinities - this gives any in-progress
 		// allocations an opportunity to finish.
 		time.Sleep(500 * time.Millisecond)
-		err = r.client.IPAM().ReleasePoolAffinities(ctx, pool.Spec.VLAN.VlanId, *cidrNet)
+		err = r.client.IPAM().ReleasePoolAffinities(ctx, pool.ID(), *cidrNet)
 
 		// Depending on the datastore, IPAM may not be supported.  If we get a not supported
 		// error, then continue.  Any other error, fail.

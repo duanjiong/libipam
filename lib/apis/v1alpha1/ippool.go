@@ -40,6 +40,8 @@ type IPPool struct {
 
 // IPPoolSpec contains the specification for an IPPool resource.
 type IPPoolSpec struct {
+	Type string `json:"type"`
+
 	// The pool CIDR.
 	CIDR string `json:"cidr" validate:"net"`
 
@@ -61,6 +63,8 @@ type IPPoolSpec struct {
 	Routes     []Route    `json:"routes,omitempty"`
 	DNS        DNS        `json:"dns,omitempty"`
 	DHCP       bool       `json:"dhcp,omitempty"`
+	Workspace  string     `json:"workspace,omitempty"`
+	Namespace  string     `json:"namespace,omitempty"`
 }
 
 type Route struct {
@@ -103,6 +107,27 @@ func (pool IPPool) SelectsNode(n Node) (bool, error) {
 	}
 	// Return whether or not the selector matches.
 	return sel.Evaluate(n.Labels), nil
+}
+
+const (
+	VLAN        = "vlan"
+	Porter      = "porter"
+	VLANIDStart = 1
+	VLANIDEnd   = 4097
+	PorterID    = 4098
+	PodID       = 0
+)
+
+
+func (pool IPPool) ID() uint32 {
+	switch pool.Spec.Type {
+	case VLAN:
+		return pool.Spec.VLAN.VlanId + VLANIDStart
+	case Porter:
+		return PorterID
+	}
+
+	return PodID
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object

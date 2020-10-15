@@ -34,6 +34,7 @@ const (
 	IPAMBlockAttributeNamespace     = "namespace"
 	IPAMBlockAttributeNode          = "node"
 	IPAMBlockAttributeType          = "type"
+	IPAMBlockAttributeTypeKubevirt  = "kubevirtAddress"
 	IPAMBlockAttributeTypeIPIP      = "ipipTunnelAddress"
 	IPAMBlockAttributeTypeVXLAN     = "vxlanTunnelAddress"
 	IPAMBlockAttributeTypeWireguard = "wireguardTunnelAddress"

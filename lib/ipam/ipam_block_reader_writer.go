@@ -74,7 +74,7 @@ func (rw blockReaderWriter) getAffineBlocks(ctx context.Context, host string, ve
 					return
 				}
 
-				if poolNet.Contains(k.CIDR.IPNet.IP) && pool.Spec.VLAN.VlanId == k.ID {
+				if poolNet.Contains(k.CIDR.IPNet.IP) && pool.ID() == k.ID {
 					blocksInPool = append(blocksInPool, k.CIDR)
 					found = true
 					break
@@ -108,7 +108,7 @@ func (rw blockReaderWriter) findUnclaimedBlock(ctx context.Context, host string,
 	/// Build a map for faster lookups.
 	exists := map[string]bool{}
 	for _, e := range existingBlocks.KVPairs {
-		if e.Key.(model.BlockKey).ID != pools[0].Spec.VLAN.VlanId {
+		if e.Key.(model.BlockKey).ID != pools[0].ID() {
 			continue
 		}
 		exists[fmt.Sprintf("%s", e.Key.(model.BlockKey).CIDR.String())] = true
@@ -178,6 +178,7 @@ func (rw blockReaderWriter) claimAffineBlock(ctx context.Context, aff *model.KVP
 	subnet := aff.Key.(model.BlockAffinityKey).CIDR
 	id := aff.Key.(model.BlockAffinityKey).ID
 	host := aff.Key.(model.BlockAffinityKey).Host
+	// Kubesphere add filed id
 	logCtx := log.WithFields(log.Fields{"host": host, "id": id, "subnet": subnet})
 
 	// Create the new block.
@@ -422,7 +423,7 @@ func (rw blockReaderWriter) getPoolForIP(id uint32, ip cnet.IP, enabledPools []v
 		if err != nil {
 			fields := log.Fields{"pool": p.Name, "cidr": p.Spec.CIDR}
 			log.WithError(err).WithFields(fields).Warn("Pool has invalid CIDR")
-		} else if pool.Contains(ip.IP) && uint32(p.Spec.VLAN.VlanId) == id {
+		} else if pool.Contains(ip.IP) && p.ID() == id {
 			return &p, nil
 		}
 	}

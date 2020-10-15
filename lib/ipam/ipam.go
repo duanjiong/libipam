@@ -138,6 +138,7 @@ func (c ipamClient) getBlockFromAffinity(ctx context.Context, aff *model.KVPair,
 	host := aff.Key.(model.BlockAffinityKey).Host
 	id := aff.Key.(model.BlockAffinityKey).ID
 	state := aff.Value.(*model.BlockAffinity).State
+	//Kubesphere added file id
 	logCtx := log.WithFields(log.Fields{"host": host, "id": id, "cidr": cidr})
 
 	// Get the block referenced by this affinity.
@@ -246,7 +247,7 @@ func (c ipamClient) determinePools(ctx context.Context, requestedPoolNets []net.
 	}
 
 	for _, p := range tmpPools {
-		if p.Spec.VLAN.VlanId == id {
+		if p.ID() == id {
 			enabledPools = append(enabledPools, p)
 		}
 	}
@@ -1385,7 +1386,7 @@ func (c ipamClient) GetUtilization(ctx context.Context, args GetUtilizationArgs)
 	wantAllPools := len(args.Pools) == 0
 	wantedPools := set.FromArray(args.Pools)
 	for _, pool := range allPools {
-		if wantAllPools || (pool.Spec.VLAN.VlanId == args.ID &&
+		if wantAllPools || (pool.ID() == args.ID &&
 			(wantedPools.Contains(pool.Name) ||
 				wantedPools.Contains(pool.Spec.CIDR))) {
 			usage = append(usage, &PoolUtilization{
